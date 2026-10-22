@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>TruthCheck settings</title>
+  <style>
+    body { width: 300px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 14px; color: #1f2328; }
+    h1 { font-size: 15px; margin: 0 0 10px 0; }
+    label { font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px; }
+    input[type="password"] { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13px; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 8px; }
+    button { width: 100%; padding: 8px; font-size: 13px; border: none; border-radius: 6px; background: #111827; color: #fff; cursor: pointer; margin-bottom: 6px; }
+    #status { font-size: 12px; margin-top: 6px; min-height: 16px; }
+    .ok { color: #1a7f37; } .err { color: #cf222e; }
+    p.hint { font-size: 11px; color: #57606a; margin-top: 10px; line-height: 1.4; }
+    a { color: #0969da; }
+    .toggle-row { display: flex; align-items: center; gap: 8px; margin: 0 0 14px 0; font-size: 12px; }
+    .toggle-row input { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>🔍 TruthCheck</h1>
+  <label class="toggle-row" for="autoCheck">
+    <input type="checkbox" id="autoCheck" checked />
+    Automatically check AI chat answers (ChatGPT, Claude.ai, Gemini)
+  </label>
+
+  <label for="groqKey">Your own free key (optional)</label>
+  <input type="password" id="groqKey" placeholder="gsk_..." />
+  <button id="save">Save key</button>
+  <button id="test">Test key</button>
+  <div id="status"></div>
+
+  <p class="hint">
+    Checking works out of the box. If you ever see a "shared limit reached" message, get a free key (email only, no card) at
+    <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a>
+    and paste it here to keep going without limits from other people.
+  </p>
+  <script src="popup.js"></script>
+</body>
+</html>
