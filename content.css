@@ -1,126 +1,159 @@
-.truthcheck-btn,
-.truthcheck-inline-btn {
+/* TruthCheck: clean and minimal. White, thin lines, system fonts, one muted color per verdict. */
+
+/* ---------- selection button ---------- */
+.truthcheck-btn {
+  all: unset;
   position: absolute;
   z-index: 2147483647;
-  background: #111827;
-  color: #fff;
-  border: none;
+  box-sizing: border-box;
+  padding: 5px 12px;
   border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 13px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #1a1a1a;
+  color: #ffffff;
+  font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
+.truthcheck-btn:hover { background: #000000; }
+.truthcheck-btn:focus-visible { outline: 2px solid #1a1a1a; outline-offset: 2px; }
 
-.truthcheck-inline-btn {
-  position: static;
+/* ---------- inline badge under AI answers ---------- */
+/* Inherits the chat site's text color, so it suits both light and dark themes. */
+.truthcheck-badge {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  cursor: pointer;
+}
+.truthcheck-badge .truthcheck-badge-text { opacity: 0.75; }
+.truthcheck-badge:hover .truthcheck-badge-text,
+.truthcheck-badge:focus-visible .truthcheck-badge-text { opacity: 1; }
+.truthcheck-badge:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- status dot (badge + card) ---------- */
+.truthcheck-dot {
   display: inline-block;
-  margin-top: 6px;
-  opacity: 0.85;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
 }
-.truthcheck-inline-btn:hover {
-  opacity: 1;
+.truthcheck-pulse { animation: truthcheck-pulse 1.2s ease-in-out infinite; }
+@keyframes truthcheck-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .truthcheck-pulse { animation: none; }
 }
 
+/* ---------- result card ---------- */
 .truthcheck-card {
+  all: initial;
   position: absolute;
   z-index: 2147483647;
+  box-sizing: border-box;
   width: 320px;
-  max-width: 90vw;
+  max-width: calc(100vw - 16px);
   background: #ffffff;
-  color: #1f2328;
+  color: #1a1a1a;
+  border: 1px solid #e6e6e6;
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 13px;
-  line-height: 1.4;
-  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  text-align: left;
+}
+.truthcheck-card *,
+.truthcheck-card *::before,
+.truthcheck-card *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  text-align: left;
 }
 
-.truthcheck-header {
+.truthcheck-card .truthcheck-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
-  background: #f6f8fa;
-  border-bottom: 1px solid #d0d7de;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #efefef;
 }
-
-.truthcheck-close {
-  background: none;
-  border: none;
+.truthcheck-card .truthcheck-verdict {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+.truthcheck-card .truthcheck-conf {
+  color: #6b6b6b;
+  font-size: 12px;
+}
+.truthcheck-card .truthcheck-close {
+  all: unset;
+  box-sizing: border-box;
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  line-height: 22px;
+  text-align: center;
   font-size: 18px;
-  line-height: 1;
+  color: #8a8a8a;
+  border-radius: 6px;
   cursor: pointer;
-  color: #57606a;
 }
+.truthcheck-card .truthcheck-close:hover { color: #1a1a1a; background: #f3f3f3; }
+.truthcheck-card .truthcheck-close:focus-visible { outline: 2px solid #1a1a1a; outline-offset: 1px; }
 
-.truthcheck-body {
-  padding: 12px;
-  max-height: 300px;
+.truthcheck-card .truthcheck-body {
+  padding: 12px 14px 14px;
+  max-height: 320px;
   overflow-y: auto;
 }
+.truthcheck-card .truthcheck-body p { color: #1a1a1a; }
+.truthcheck-card .truthcheck-body p + p,
+.truthcheck-card .truthcheck-body p + div,
+.truthcheck-card .truthcheck-body div + p { margin-top: 12px; }
 
-.truthcheck-body p {
-  margin: 0 0 8px 0;
-}
+.truthcheck-card .truthcheck-muted { color: #6b6b6b; }
+.truthcheck-card .truthcheck-small { font-size: 11px; word-break: break-word; }
 
-.truthcheck-confidence {
+.truthcheck-card .truthcheck-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12px;
   font-weight: 600;
-  color: #57606a;
+  color: #6b6b6b;
 }
 
-.truthcheck-correction {
-  background: #fff8c5;
-  padding: 8px;
-  border-radius: 6px;
+.truthcheck-card .truthcheck-correction {
+  padding-left: 10px;
+  border-left: 2px solid #6b6b6b;
 }
 
-.truthcheck-sources ul {
-  margin: 4px 0 0 0;
-  padding-left: 18px;
+.truthcheck-card .truthcheck-sources ul { list-style: none; }
+.truthcheck-card .truthcheck-sources li { padding: 5px 0; border-top: 1px solid #f1f1f1; }
+.truthcheck-card .truthcheck-sources li:first-child { border-top: 0; }
+.truthcheck-card .truthcheck-sources a {
+  display: block;
+  color: #1a1a1a;
+  text-decoration: underline;
+  text-decoration-color: #c9c9c9;
+  text-underline-offset: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.truthcheck-error {
-  color: #cf222e;
-}
-
-.truthcheck-badge {
-  display: inline-block;
-  margin-top: 6px;
-  padding: 2px 8px;
+.truthcheck-card .truthcheck-sources a:hover { text-decoration-color: #1a1a1a; }
+.truthcheck-card .truthcheck-sources a:focus-visible { outline: 2px solid #1a1a1a; outline-offset: 2px; }
+.truthcheck-card .truthcheck-host {
+  display: block;
   font-size: 11px;
-  font-weight: 600;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  border: 1px solid #d0d7de;
-  border-radius: 999px;
-  cursor: pointer;
-  background: #fff;
-  opacity: 0.9;
-}
-.truthcheck-badge:hover {
-  opacity: 1;
-}
-.truthcheck-badge-loading {
-  color: #57606a;
-  border-color: #d0d7de;
-}
-.truthcheck-badge-error {
-  color: #cf222e;
-  border-color: #cf222e;
-}
-
-.truthcheck-spinner {
-  width: 20px;
-  height: 20px;
-  border: 3px solid #d0d7de;
-  border-top-color: #111827;
-  border-radius: 50%;
-  animation: truthcheck-spin 0.8s linear infinite;
-  margin-bottom: 8px;
-}
-
-@keyframes truthcheck-spin {
-  to { transform: rotate(360deg); }
+  color: #8a8a8a;
 }
