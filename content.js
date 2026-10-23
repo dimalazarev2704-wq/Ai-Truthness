@@ -2,13 +2,35 @@
 // 1) Lets the user select any text and click "Verify" to fact-check it.
 // 2) On known AI chat sites, automatically checks each new AI answer and shows a result badge.
 
-const VERDICT_STYLES = {
-  true: { color: "#1a7f37", label: "✓ Looks accurate" },
-  false: { color: "#cf222e", label: "✗ Inaccurate" },
-  partially_true: { color: "#9a6700", label: "◐ Partially accurate" },
-  uncertain: { color: "#57606a", label: "? Uncertain" },
-  opinion: { color: "#57606a", label: "— Opinion / not checkable" }
+const VERDICTS = {
+  true: { color: "#2E7D4F", label: "Accurate" },
+  false: { color: "#B3412F", label: "Inaccurate" },
+  partially_true: { color: "#A0721A", label: "Partly accurate" },
+  uncertain: { color: "#6B6B6B", label: "Can't confirm" },
+  opinion: { color: "#6B6B6B", label: "Opinion" }
 };
+
+// The AI sometimes answers 0.9 instead of 90. Treat 0-1 as a fraction.
+function normConf(c) {
+  let n = Number(c);
+  if (!Number.isFinite(n)) return null;
+  if (n > 0 && n <= 1) n = n * 100;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function formatReset(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "later";
+  return d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+
+function hostOf(url) {
+  try {
+    return new URL(String(url)).hostname.replace(/^www\./, "");
+  } catch (e) {
+    return "";
+  }
+}
 
 // ---------- shared UI: result card ----------
 
@@ -17,87 +39,98 @@ function removeExistingCard() {
   if (existing) existing.remove();
 }
 
-function renderCard(anchorRect, state) {
+// Anchors are kept in document coordinates, so the card doesn't jump if the page
+// scrolls while a check is running.
+function docRect(rect) {
+  return {
+    top: rect.top + window.scrollY,
+    bottom: rect.bottom + window.scrollY,
+    left: rect.left + window.scrollX
+  };
+}
+
+function renderCard(anchor, state) {
   removeExistingCard();
 
   const card = document.createElement("div");
   card.id = "truthcheck-card";
   card.className = "truthcheck-card";
-
-  const top = Math.min(
-    window.scrollY + anchorRect.bottom + 8,
-    window.scrollY + document.documentElement.clientHeight - 20
-  );
-  const left = Math.min(
-    window.scrollX + anchorRect.left,
-    window.scrollX + document.documentElement.clientWidth - 340
-  );
-  card.style.top = `${top}px`;
-  card.style.left = `${Math.max(8, left)}px`;
-
   card.innerHTML = renderCardContent(state);
+  card.style.visibility = "hidden"; // measure first, then place
   document.body.appendChild(card);
+
+  const margin = 8;
+  const viewTop = window.scrollY;
+  const viewBottom = window.scrollY + window.innerHeight;
+  const viewLeft = window.scrollX;
+  const viewRight = window.scrollX + document.documentElement.clientWidth;
+  const h = card.offsetHeight;
+  const w = card.offsetWidth;
+
+  // Prefer just below the anchor. If that would run off the screen, go above it;
+  // if there's no room above either, slide it up so it stays fully visible.
+  let top = anchor.bottom + margin;
+  if (top + h > viewBottom - margin) {
+    const above = anchor.top - margin - h;
+    top = above >= viewTop + margin ? above : Math.max(viewTop + margin, viewBottom - margin - h);
+  }
+  const left = Math.max(viewLeft + margin, Math.min(anchor.left, viewRight - w - margin));
+  card.style.top = `${top}px`;
+  card.style.left = `${left}px`;
+  card.style.visibility = "visible";
 
   const closeBtn = card.querySelector(".truthcheck-close");
   if (closeBtn) closeBtn.addEventListener("click", removeExistingCard);
 }
 
+function cardHead(color, title, extra, pulse) {
+  return `<div class="truthcheck-head">
+      <span class="truthcheck-dot${pulse ? " truthcheck-pulse" : ""}" style="background:${color}"></span>
+      <span class="truthcheck-verdict">${escapeHtml(title)}</span>
+      ${extra ? `<span class="truthcheck-conf">${escapeHtml(extra)}</span>` : ""}
+      <button class="truthcheck-close" aria-label="Close">&times;</button>
+    </div>`;
+}
+
 function renderCardContent(state) {
   if (state.loading) {
-    return `
-      <div class="truthcheck-header">
-        <span>Checking…</span>
-        <button class="truthcheck-close">&times;</button>
-      </div>
-      <div class="truthcheck-body">
-        <div class="truthcheck-spinner"></div>
-        <p>Searching the web to verify this claim…</p>
-      </div>`;
+    return `${cardHead("#6B6B6B", "Checking", "", true)}
+      <div class="truthcheck-body"><p class="truthcheck-muted">Searching the web for sources…</p></div>`;
   }
 
   if (state.error) {
-    let msg = "Something went wrong.";
-    if (state.error === "NOT_CONFIGURED") {
-      msg = "This extension isn't connected to its server yet. The developer needs to add the server URL before publishing.";
-    } else if (state.error === "SHARED_LIMIT_REACHED") {
-      msg = "Lots of people are using the built-in free checking right now, so today's shared limit is used up. Click the TruthCheck icon in your toolbar to add your own free key (about 30 seconds, no card) and keep going.";
-    } else if (state.error === "OWN_KEY_RATE_LIMITED") {
-      msg = "You've hit your own key's rate limit for now. Wait a bit and try again.";
-    } else if (state.error === "RATE_LIMITED") {
-      msg = state.detail || "Too many checks in a short time. Try again in a few minutes.";
-    } else if (state.error === "API_ERROR") {
-      msg = `API error: ${state.detail || ""}`;
-    } else if (state.error === "PARSE_ERROR") {
-      msg = `Got an unexpected response: ${(state.raw || "").slice(0, 200)}`;
-    } else if (state.error === "NETWORK_ERROR") {
-      msg = `Network error: ${state.detail || ""}`;
-    }
-    return `
-      <div class="truthcheck-header">
-        <span>TruthCheck</span>
-        <button class="truthcheck-close">&times;</button>
-      </div>
-      <div class="truthcheck-body truthcheck-error">
+    const messages = {
+      NOT_SIGNED_IN: "Sign in to check this. Open the TruthCheck icon in your toolbar to create a free account or sign in.",
+      DAILY_LIMIT_REACHED: `You've used today's free checks. They reset ${formatReset(state.resetsAt)}.`,
+      SERVICE_BUSY: "TruthCheck is busy right now. Try again in a few minutes.",
+      RATE_LIMITED: state.detail || "Too many checks in a short time. Try again in a minute.",
+      SERVER_MISCONFIGURED: "The server isn't fully set up yet.",
+      SERVER_MISSING_KEY: "The server isn't fully set up yet.",
+      DATABASE_UNAVAILABLE: "The account service is waking up. Try again in a moment.",
+      PARSE_ERROR: "The answer came back in a form that couldn't be read. Try again.",
+      NETWORK_ERROR: state.detail || "Couldn't reach the server. If it was idle it may be waking up, so try again in 30 seconds.",
+      API_ERROR: "The checking service had a problem. Try again in a moment."
+    };
+    const msg = messages[state.error] || "Something went wrong. Try again.";
+    const showDetail = state.error === "API_ERROR" && state.detail;
+    return `${cardHead("#B3412F", "Couldn't check", "", false)}
+      <div class="truthcheck-body">
         <p>${escapeHtml(msg)}</p>
+        ${showDetail ? `<p class="truthcheck-muted truthcheck-small">${escapeHtml(String(state.detail).slice(0, 160))}</p>` : ""}
       </div>`;
   }
 
   const r = state.result || {};
-  const v = VERDICT_STYLES[r.verdict] || VERDICT_STYLES.uncertain;
-  const sources = Array.isArray(r.sources) ? r.sources : [];
+  const v = VERDICTS[r.verdict] || VERDICTS.uncertain;
+  const conf = normConf(r.confidence);
+  const sources = (Array.isArray(r.sources) ? r.sources : []).filter((s) => safeUrl(s.url)).slice(0, 4);
 
-  return `
-    <div class="truthcheck-header" style="border-left: 4px solid ${v.color}">
-      <span style="color:${v.color}; font-weight:600;">${v.label}</span>
-      <button class="truthcheck-close">&times;</button>
-    </div>
+  return `${cardHead(v.color, v.label, conf === null ? "" : `${conf}% confident`, false)}
     <div class="truthcheck-body">
-      <p class="truthcheck-confidence">Confidence: ${Number.isFinite(Number(r.confidence)) ? Math.round(Number(r.confidence)) : "?"}%</p>
       <p>${escapeHtml(r.summary || "No summary provided.")}</p>
-      ${r.corrections ? `<p class="truthcheck-correction"><strong>Correction:</strong> ${escapeHtml(r.corrections)}</p>` : ""}
-      ${sources.filter((s) => safeUrl(s.url)).length ? `<div class="truthcheck-sources"><strong>Sources:</strong><ul>${sources
-        .filter((s) => safeUrl(s.url))
-        .map((s) => `<li><a href="${escapeAttr(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || s.url)}</a></li>`)
+      ${r.corrections ? `<p class="truthcheck-correction" style="border-left-color:${v.color}"><span class="truthcheck-label">Correction</span>${escapeHtml(r.corrections)}</p>` : ""}
+      ${sources.length ? `<div class="truthcheck-sources"><span class="truthcheck-label">Sources</span><ul>${sources
+        .map((s) => `<li><a href="${escapeAttr(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || hostOf(s.url))}</a><span class="truthcheck-host">${escapeHtml(hostOf(s.url))}</span></li>`)
         .join("")}</ul></div>` : ""}
     </div>`;
 }
@@ -139,20 +172,20 @@ function sendToBackground(message, callback) {
   }
 }
 
-function requestVerification(text, anchorRect) {
-  renderCard(anchorRect, { loading: true });
+function requestVerification(text, anchor) {
+  renderCard(anchor, { loading: true });
   sendToBackground({ type: "VERIFY_CLAIM", text }, (response) => {
     if (!response) {
-      renderCard(anchorRect, {
+      renderCard(anchor, {
         error: "NETWORK_ERROR",
         detail: "No response from the extension. If you just updated it, refresh this page."
       });
       return;
     }
     if (response.error) {
-      renderCard(anchorRect, response);
+      renderCard(anchor, response);
     } else {
-      renderCard(anchorRect, { result: response.result });
+      renderCard(anchor, { result: response.result });
     }
   });
 }
@@ -186,12 +219,13 @@ document.addEventListener("mouseup", (e) => {
 
     selectionBtn = document.createElement("button");
     selectionBtn.className = "truthcheck-btn";
-    selectionBtn.textContent = "🔍 Verify";
-    selectionBtn.style.top = `${window.scrollY + rect.top - 34}px`;
-    selectionBtn.style.left = `${window.scrollX + rect.left}px`;
+    selectionBtn.textContent = "Verify";
+    const anchor = docRect(rect);
+    selectionBtn.style.top = `${Math.max(window.scrollY + 4, anchor.top - 34)}px`;
+    selectionBtn.style.left = `${anchor.left}px`;
     selectionBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      requestVerification(text, rect);
+      requestVerification(text, anchor);
       removeSelectionBtn();
     });
     document.body.appendChild(selectionBtn);
@@ -215,55 +249,61 @@ const AI_SITE_SELECTORS = [
   { host: "gemini.google.com", selector: ".model-response-text, message-content" }
 ];
 
-const BADGE_STYLES = {
-  true: { color: "#1a7f37", label: "✓" },
-  false: { color: "#cf222e", label: "✗" },
-  partially_true: { color: "#9a6700", label: "◐" },
-  uncertain: { color: "#57606a", label: "?" },
-  opinion: { color: "#57606a", label: "—" }
-};
-
 function getSelectorForThisHost() {
   const host = window.location.hostname;
   const match = AI_SITE_SELECTORS.find((s) => host.includes(s.host));
   return match ? match.selector : null;
 }
 
+function setBadge(badge, color, text, pulse) {
+  const dot = document.createElement("span");
+  dot.className = "truthcheck-dot" + (pulse ? " truthcheck-pulse" : "");
+  dot.style.background = color;
+  const label = document.createElement("span");
+  label.className = "truthcheck-badge-text";
+  label.textContent = text;
+  badge.replaceChildren(dot, label);
+}
+
 function makeBadge(container) {
   const badge = document.createElement("span");
-  badge.className = "truthcheck-badge truthcheck-badge-loading";
-  badge.textContent = "⋯";
+  badge.className = "truthcheck-badge";
+  badge.setAttribute("role", "button");
+  badge.tabIndex = 0;
+  setBadge(badge, "#6B6B6B", "Checking", true);
   badge.title = "Checking this answer…";
   container.appendChild(document.createElement("br"));
   container.appendChild(badge);
-  badge.addEventListener("click", (e) => {
+  const open = (e) => {
     e.stopPropagation();
     if (!badge.dataset.state) return; // still loading
-    renderCard(badge.getBoundingClientRect(), JSON.parse(badge.dataset.state));
+    renderCard(docRect(badge.getBoundingClientRect()), JSON.parse(badge.dataset.state));
+  };
+  badge.addEventListener("click", open);
+  badge.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      open(e);
+    }
   });
   return badge;
 }
 
 function updateBadgeWithResponse(badge, response) {
   if (!response || response.error) {
-    badge.className = "truthcheck-badge truthcheck-badge-error";
-    badge.textContent = "!";
-    badge.title =
-      response && response.error === "SHARED_LIMIT_REACHED"
-        ? "Shared free limit reached. Click for how to add your own free key."
-        : "Couldn't check this answer. Click for details.";
+    const code = response && response.error;
+    const label = code === "DAILY_LIMIT_REACHED" ? "Daily limit reached" : code === "NOT_SIGNED_IN" ? "Sign in to check" : "Couldn't check";
+    setBadge(badge, code === "DAILY_LIMIT_REACHED" || code === "NOT_SIGNED_IN" ? "#6B6B6B" : "#B3412F", label, false);
+    badge.title = "Click for details.";
     badge.dataset.state = JSON.stringify(
       response || { error: "NETWORK_ERROR", detail: "No response from the extension. Try refreshing the page." }
     );
     return;
   }
   const r = response.result || {};
-  const style = BADGE_STYLES[r.verdict] || BADGE_STYLES.uncertain;
-  const conf = Number.isFinite(Number(r.confidence)) ? Math.round(Number(r.confidence)) : "?";
-  badge.className = "truthcheck-badge";
-  badge.style.color = style.color;
-  badge.style.borderColor = style.color;
-  badge.textContent = `${style.label} ${conf}%`;
+  const v = VERDICTS[r.verdict] || VERDICTS.uncertain;
+  const conf = normConf(r.confidence);
+  setBadge(badge, v.color, conf === null ? v.label : `${v.label} ${conf}%`, false);
   badge.title = r.summary || "Click for details";
   badge.dataset.state = JSON.stringify({ result: r });
 }
@@ -289,6 +329,19 @@ function runNextJob() {
 
 const trackedContainers = new Map(); // container -> { lastText, stableSince, changed, done }
 let autoCheckEnabled = true;
+let signedIn = false; // automatic checks only run for signed-in people
+let pausedUntil = 0; // set when today's limit is used up, so we stop asking the server
+
+// Chat pages change constantly while an answer streams in, so don't rescan on every
+// tiny change: at most once every 400 ms.
+let scanTimer = null;
+function scheduleScan() {
+  if (scanTimer) return;
+  scanTimer = setTimeout(() => {
+    scanTimer = null;
+    scanForAiMessages();
+  }, 400);
+}
 
 function scanForAiMessages() {
   if (!autoCheckEnabled) return;
@@ -297,7 +350,7 @@ function scanForAiMessages() {
   document.querySelectorAll(selector).forEach((container) => {
     if (!trackedContainers.has(container)) {
       trackedContainers.set(container, {
-        lastText: container.innerText.trim(),
+        lastText: container.textContent.trim(), // textContent is far cheaper than innerText
         stableSince: Date.now(),
         changed: false, // becomes true only if the text streams in while we watch
         done: false
@@ -315,7 +368,7 @@ function stabilityTick() {
       trackedContainers.delete(container);
       return;
     }
-    const currentText = container.innerText.trim();
+    const currentText = container.textContent.trim();
     if (currentText !== state.lastText) {
       state.lastText = currentText;
       state.stableSince = now;
@@ -328,10 +381,18 @@ function stabilityTick() {
     if (!state.changed) return;
     if (currentText.length > 15 && now - state.stableSince >= 1200) {
       state.done = true;
-      const text = currentText.slice(0, 6000); // read BEFORE adding our badge
+      // Signed out, or today's limit is used up: skip quietly, no badge.
+      if (!signedIn || Date.now() < pausedUntil) return;
+      // innerText keeps paragraph breaks. Read it BEFORE adding our badge.
+      const text = (container.innerText || currentText).trim().slice(0, 6000);
       const badge = makeBadge(container);
       enqueueJob((finish) => {
         sendToBackground({ type: "VERIFY_CLAIM", text }, (response) => {
+          if (response && response.error === "DAILY_LIMIT_REACHED") {
+            const t = Date.parse(response.resetsAt);
+            pausedUntil = Number.isFinite(t) ? t : Date.now() + 60 * 60 * 1000;
+          }
+          if (response && response.error === "NOT_SIGNED_IN") signedIn = false;
           updateBadgeWithResponse(badge, response);
           finish();
         });
@@ -342,17 +403,22 @@ function stabilityTick() {
 
 const selectorForHost = getSelectorForThisHost();
 if (selectorForHost) {
-  chrome.storage.local.get(["autoCheck"], ({ autoCheck }) => {
+  chrome.storage.local.get(["autoCheck", "authToken"], ({ autoCheck, authToken }) => {
     autoCheckEnabled = autoCheck !== false; // default: on
+    signedIn = Boolean(authToken);
     // Always start watching; the flag is checked inside, so turning the toggle
     // on later works without reloading the page.
     scanForAiMessages();
-    const observer = new MutationObserver(() => scanForAiMessages());
+    const observer = new MutationObserver(() => scheduleScan());
     observer.observe(document.body, { childList: true, subtree: true });
     setInterval(stabilityTick, 800);
   });
 
   chrome.storage.onChanged.addListener((changes) => {
+    if (changes.authToken) {
+      signedIn = Boolean(changes.authToken.newValue);
+      if (signedIn) pausedUntil = 0;
+    }
     if (changes.autoCheck) {
       autoCheckEnabled = changes.autoCheck.newValue !== false;
       if (autoCheckEnabled) scanForAiMessages();
