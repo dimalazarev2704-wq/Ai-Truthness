@@ -1,66 +1,108 @@
-// background.js — service worker
-// Sends text to your TruthCheck server (hosted on Render, code on GitHub).
-// The server holds the shared Groq key and does search + checking.
-// Users may optionally add their OWN free Groq key in the popup; it is sent to the
-// server with each request so their usage never touches the shared quota.
+// background.js: service worker.
+// Talks to your TruthCheck server (Render). Handles sign up, sign in and checks.
+// The session token is kept in the browser's extension storage; passwords are never stored.
 
-// ⚠️ SETUP: after deploying the server (see factcheck-server/DEPLOY.md),
-// replace this with your Render URL (no trailing slash).
-const SERVER_URL = "https://YOUR-APP-NAME.onrender.com";
+const SERVER_URL = "https://aifactcheck-server.onrender.com";
 
-async function verifyClaim(text) {
-  if (SERVER_URL.includes("YOUR-APP-NAME")) {
-    return { error: "NOT_CONFIGURED" };
-  }
-  const { groqApiKey } = await chrome.storage.local.get("groqApiKey");
+async function getToken() {
+  const { authToken } = await chrome.storage.local.get("authToken");
+  return authToken || null;
+}
+
+async function clearSession() {
+  await chrome.storage.local.remove(["authToken", "userEmail"]);
+}
+
+// One place that talks to the server. Returns { status, data } or { networkError }.
+async function callServer(path, { method = "GET", body, token } = {}) {
   const headers = { "Content-Type": "application/json" };
-  if (groqApiKey && groqApiKey.trim()) {
-    headers["x-user-groq-key"] = groqApiKey.trim();
-  }
-
+  if (token) headers.Authorization = `Bearer ${token}`;
   try {
-    const resp = await fetch(`${SERVER_URL}/verify`, {
-      method: "POST",
+    const resp = await fetch(`${SERVER_URL}${path}`, {
+      method,
       headers,
-      body: JSON.stringify({ text })
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(60000) // free servers can take ~30s to wake up
     });
-    let data;
+    let data = {};
     try {
       data = await resp.json();
     } catch (e) {
-      return { error: "PARSE_ERROR", raw: "" };
+      if (resp.status >= 500) {
+        // A server that is still waking up often answers with a plain HTML error page.
+        return {
+          networkError: true,
+          data: { error: "NETWORK_ERROR", detail: "The server is waking up. Try again in 30 seconds." }
+        };
+      }
+      data = { error: "PARSE_ERROR" };
     }
-    if (!resp.ok) {
-      return { error: data.error || "API_ERROR", detail: data.detail || `HTTP ${resp.status}`, raw: data.raw };
-    }
-    return data;
+    return { status: resp.status, ok: resp.ok, data };
   } catch (e) {
-    return { error: "NETWORK_ERROR", detail: "Couldn't reach the server. If it was idle it may be waking up - try again in 30 seconds." };
+    return {
+      networkError: true,
+      data: {
+        error: "NETWORK_ERROR",
+        detail: "Couldn't reach the server. If it was idle it may be waking up, so try again in 30 seconds."
+      }
+    };
   }
 }
 
+// Keep only the fields the interface needs.
+function errorFrom(data) {
+  return {
+    error: data.error || "API_ERROR",
+    detail: data.detail,
+    raw: data.raw,
+    used: data.used,
+    limit: data.limit,
+    resetsAt: data.resetsAt
+  };
+}
+
+async function signInOrUp(kind, email, password) {
+  const r = await callServer(kind === "signup" ? "/auth/signup" : "/auth/login", {
+    method: "POST",
+    body: { email, password }
+  });
+  if (r.networkError || !r.ok) return errorFrom(r.data);
+  await chrome.storage.local.set({ authToken: r.data.token, userEmail: r.data.email });
+  return { ok: true, email: r.data.email };
+}
+
+async function getMe() {
+  const token = await getToken();
+  if (!token) return { error: "NOT_SIGNED_IN" };
+  const r = await callServer("/me", { token });
+  if (r.status === 401) {
+    await clearSession();
+    return { error: "NOT_SIGNED_IN" };
+  }
+  if (r.networkError || !r.ok) return errorFrom(r.data);
+  return { me: r.data };
+}
+
+async function verifyClaim(text) {
+  const token = await getToken();
+  if (!token) return { error: "NOT_SIGNED_IN" };
+  const r = await callServer("/verify", { method: "POST", body: { text }, token });
+  if (r.status === 401) {
+    await clearSession();
+    return { error: "NOT_SIGNED_IN" };
+  }
+  if (r.networkError || !r.ok) return errorFrom(r.data);
+  return r.data; // { result, usage }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "VERIFY_CLAIM") {
-    verifyClaim(message.text).then(sendResponse);
-    return true;
-  }
-  if (message.type === "TEST_OWN_KEY") {
-    (async () => {
-      try {
-        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${message.apiKey}` },
-          body: JSON.stringify({
-            model: "llama-3.3-70b-versatile",
-            max_tokens: 8,
-            messages: [{ role: "user", content: "Say OK" }]
-          })
-        });
-        sendResponse({ ok: resp.ok, status: resp.status });
-      } catch (e) {
-        sendResponse({ ok: false, error: String(e) });
-      }
-    })();
-    return true;
-  }
+  let job = null;
+  if (message.type === "SIGNUP") job = signInOrUp("signup", message.email, message.password);
+  else if (message.type === "LOGIN") job = signInOrUp("login", message.email, message.password);
+  else if (message.type === "LOGOUT") job = clearSession().then(() => ({ ok: true }));
+  else if (message.type === "GET_ME") job = getMe();
+  else if (message.type === "VERIFY_CLAIM") job = verifyClaim(message.text);
+  if (!job) return false;
+  job.then(sendResponse).catch(() => sendResponse({ error: "API_ERROR" }));
+  return true; // keep the message channel open for the async response
 });
